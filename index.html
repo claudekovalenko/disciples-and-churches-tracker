@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0b0f14" />
+<title>Shepherd — Disciples & Churches</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="page-title">Disciples</h1>
+  <div class="topbar-actions">
+    <button id="btn-list" class="icon-btn" title="Toggle list view" aria-label="Toggle list view">☰</button>
+    <button id="btn-add" class="icon-btn accent" title="Add new" aria-label="Add new">+</button>
+  </div>
+</header>
+
+<main>
+  <div id="map"></div>
+
+  <!-- sliding list panel -->
+  <section id="list-panel" class="list-panel" aria-hidden="true">
+    <div class="list-scroll" id="list-scroll"></div>
+  </section>
+
+  <!-- detail bottom sheet -->
+  <section id="sheet" class="sheet" aria-hidden="true">
+    <div class="sheet-grab"></div>
+    <div id="sheet-content"></div>
+  </section>
+
+  <!-- add/edit form sheet -->
+  <section id="form-sheet" class="sheet form-sheet" aria-hidden="true">
+    <div class="sheet-grab"></div>
+    <div id="form-content"></div>
+  </section>
+
+  <div id="scrim" class="scrim"></div>
+
+  <div id="tap-hint" class="tap-hint">Tap the map to set the location</div>
+</main>
+
+<!-- liquid glass bottom switcher -->
+<nav class="glass-nav">
+  <div class="glass-pill" id="glass-pill"></div>
+  <button class="glass-tab active" data-view="disciples">
+    <span class="tab-icon">🧑‍🤝‍🧑</span><span>Disciples</span>
+  </button>
+  <button class="glass-tab" data-view="churches">
+    <span class="tab-icon">⛪️</span><span>Churches</span>
+  </button>
+</nav>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

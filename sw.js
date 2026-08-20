@@ -1,4 +1,4 @@
-const CACHE = "shepherd-v1";
+const CACHE = "shepherd-v2";
 const ASSETS = [
   ".",
   "index.html",
@@ -26,6 +26,8 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // geocoding lookups must always go to the network, never a stale cache
+  if (e.request.url.includes("nominatim.openstreetmap.org")) return;
   e.respondWith(
     caches.match(e.request).then(
       (hit) =>

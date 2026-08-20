@@ -207,7 +207,10 @@
       <label>Name</label>
       <input type="text" id="f-name" placeholder="${type === "disciple" ? "Person's name" : "Church name"}" value="${esc(editing?.name || "")}" />
       <label>Place</label>
-      <input type="text" id="f-place" placeholder="City, State / Country" value="${esc(editing?.place || "")}" />
+      <div class="autocomplete">
+        <input type="text" id="f-place" autocomplete="off" placeholder="Start typing a city, church, or address…" value="${esc(editing?.place || "")}" />
+        <div class="ac-list" id="f-place-list" hidden></div>
+      </div>
       <label>Relationship</label>
       <div class="seg" id="f-role">
         <button data-r="building" class="${(!editing || editing.role === "building") ? "active" : ""}">🔨 Building</button>
@@ -221,8 +224,8 @@
       <label>Notes</label>
       <textarea id="f-notes" placeholder="Background, prayer points, context…">${esc(editing?.notes || "")}</textarea>
       <label>Location</label>
-      <button class="btn" id="f-pick">📍 ${loc ? "Change location on map" : "Tap map to set location"}</button>
-      <div class="loc-display" id="f-loc">${loc ? `<b>${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}</b>` : "Not set yet"}</div>
+      <button class="btn" id="f-pick">📍 ${loc ? "Adjust pin on map" : "Or tap the map to set it"}</button>
+      <div class="loc-display" id="f-loc">${loc ? `<b>${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}</b>` : "Not set yet — type a place above"}</div>
       <div class="btn-row">
         <button class="btn" id="f-cancel">Cancel</button>
         <button class="btn primary" id="f-save">${editing ? "Save changes" : "Add"}</button>
@@ -234,30 +237,174 @@
     segWire("#f-role", "r", v => role = v);
     segWire("#f-health", "h", v => health = v);
 
+    // --- place autocomplete: typing a place sets the pin automatically ---
+    const placeInput = $("#f-place");
+    const acList = $("#f-place-list");
+    let acTimer = null, acResults = [], lastQuery = "";
+
+    function setLoc(lat, lng, label) {
+      loc = { lat, lng };
+      if (label) placeInput.value = label;
+      $("#f-loc").innerHTML = `<b>${lat.toFixed(3)}, ${lng.toFixed(3)}</b> · pin set`;
+      $("#f-pick").textContent = "📍 Adjust pin on map";
+      previewPin(lat, lng);
+    }
+
+    function hideAc() { acList.hidden = true; acList.innerHTML = ""; }
+
+    function renderAc(results) {
+      acResults = results;
+      if (!results.length) { hideAc(); return; }
+      acList.innerHTML = results.map((r, i) =>
+        `<div class="ac-item" data-i="${i}"><span class="ac-main">${esc(r.main)}</span><span class="ac-sub">${esc(r.sub)}</span></div>`
+      ).join("");
+      acList.hidden = false;
+      acList.querySelectorAll(".ac-item").forEach(el => el.onclick = () => {
+        const r = acResults[el.dataset.i];
+        setLoc(r.lat, r.lng, r.label);
+        hideAc();
+      });
+    }
+
+    placeInput.addEventListener("input", () => {
+      const q = placeInput.value.trim();
+      clearTimeout(acTimer);
+      if (q.length < 3) { hideAc(); return; }
+      acList.hidden = false;
+      acList.innerHTML = `<div class="ac-item ac-status">Searching…</div>`;
+      acTimer = setTimeout(async () => {
+        if (q === lastQuery) return;
+        lastQuery = q;
+        const results = await geocode(q);
+        if (placeInput.value.trim() !== q) return; // stale
+        if (!results.length) {
+          acList.innerHTML = `<div class="ac-item ac-status">No matches — tap the map instead</div>`;
+          acList.hidden = false;
+          return;
+        }
+        renderAc(results);
+      }, 450);
+    });
+    placeInput.addEventListener("blur", () => setTimeout(hideAc, 200));
+
     $("#f-pick").onclick = () => {
       // hide the sheet while the user taps the map
       $("#form-sheet").classList.remove("open");
       $("#scrim").classList.remove("show");
       showTapHint();
-      pickingLocation = (latlng) => {
-        loc = { lat: latlng.lat, lng: latlng.lng };
+      pickingLocation = async (latlng) => {
         $("#form-sheet").classList.add("open");
         $("#scrim").classList.add("show");
-        $("#f-loc").innerHTML = `<b>${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}</b>`;
+        setLoc(latlng.lat, latlng.lng);
+        // fill the place name from the dropped pin, if we can
+        if (!placeInput.value.trim()) {
+          const label = await reverseGeocode(latlng.lat, latlng.lng);
+          if (label && !placeInput.value.trim()) placeInput.value = label;
+        }
       };
     };
-    $("#f-cancel").onclick = () => { pickingLocation = null; hideTapHint(); closeSheets(); };
-    $("#f-save").onclick = () => {
+    $("#f-cancel").onclick = () => { pickingLocation = null; hideTapHint(); clearPreviewPin(); closeSheets(); };
+    $("#f-save").onclick = async () => {
       const name = $("#f-name").value.trim();
       if (!name) { $("#f-name").focus(); return; }
-      if (!loc) { alert("Set a location by tapping the map."); return; }
+      if (!loc) {
+        // last chance: resolve whatever they typed into the place field
+        const q = placeInput.value.trim();
+        if (q.length >= 3) {
+          $("#f-save").textContent = "Finding place…";
+          const results = await geocode(q);
+          $("#f-save").textContent = editing ? "Save changes" : "Add";
+          if (results.length) setLoc(results[0].lat, results[0].lng, results[0].label);
+        }
+      }
+      if (!loc) { alert("Type a place to search for it, or tap the map to drop a pin."); return; }
       if (editing) {
         Object.assign(editing, { name, place: $("#f-place").value.trim(), role, health, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng });
       } else {
         data.push({ id: uid(), type, name, place: $("#f-place").value.trim(), role, health, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng, checkins: [] });
       }
-      save(); closeSheets(); refresh();
+      save(); clearPreviewPin(); closeSheets(); refresh();
     };
+  }
+
+  // ---------- geocoding (OpenStreetMap / Nominatim) ----------
+  const geoCache = new Map();
+
+  async function geocode(query) {
+    const key = query.toLowerCase();
+    if (geoCache.has(key)) return geoCache.get(key);
+    try {
+      const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&addressdetails=1&q=" + encodeURIComponent(query);
+      const res = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!res.ok) throw new Error(res.status);
+      const json = await res.json();
+      const out = json.map(r => {
+        const parts = r.display_name.split(",").map(s => s.trim());
+        return {
+          lat: parseFloat(r.lat),
+          lng: parseFloat(r.lon),
+          main: parts[0],
+          sub: parts.slice(1).join(", "),
+          label: shortLabel(r),
+        };
+      });
+      geoCache.set(key, out);
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async function reverseGeocode(lat, lng) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${lat}&lon=${lng}`;
+      const res = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!res.ok) throw new Error(res.status);
+      return shortLabel(await res.json());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // "Honolulu, HI" / "Tokyo, Japan" rather than the full Nominatim display_name
+  function shortLabel(r) {
+    const a = r.address || {};
+    const city = a.city || a.town || a.village || a.hamlet || a.suburb || a.county;
+    const region = a.state || a.province || a.region;
+    const country = a.country;
+    const isUS = a.country_code === "us";
+    const bits = [];
+    if (r.name && r.name !== city) bits.push(r.name);
+    if (city) bits.push(city);
+    if (isUS) { if (region) bits.push(US_ABBR[region] || region); }
+    else if (country) bits.push(country);
+    return bits.length ? bits.join(", ") : (r.display_name || "").split(",").slice(0, 2).join(", ").trim();
+  }
+
+  const US_ABBR = {
+    Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO",
+    Connecticut: "CT", Delaware: "DE", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID",
+    Illinois: "IL", Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA",
+    Maine: "ME", Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN",
+    Mississippi: "MS", Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV",
+    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+    "North Carolina": "NC", "North Dakota": "ND", Ohio: "OH", Oklahoma: "OK", Oregon: "OR",
+    Pennsylvania: "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
+    Tennessee: "TN", Texas: "TX", Utah: "UT", Vermont: "VT", Virginia: "VA", Washington: "WA",
+    "West Virginia": "WV", Wisconsin: "WI", Wyoming: "WY", "District of Columbia": "DC",
+  };
+
+  // a temporary pin so you can see where the resolved place landed
+  let previewMarker = null;
+  function previewPin(lat, lng) {
+    clearPreviewPin();
+    previewMarker = L.marker([lat, lng], {
+      icon: L.divIcon({ className: "", html: `<div class="pin preview"><span>📍</span></div>`, iconSize: [34, 34], iconAnchor: [8, 32] }),
+    }).addTo(map);
+    map.setView([lat, lng], Math.max(map.getZoom(), 9), { animate: true });
+  }
+  function clearPreviewPin() {
+    if (previewMarker) { map.removeLayer(previewMarker); previewMarker = null; }
   }
 
   function segWire(sel, attr, cb) {

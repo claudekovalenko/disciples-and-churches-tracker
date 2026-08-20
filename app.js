@@ -5,10 +5,10 @@
   // ---------- data ----------
   const seed = () => ([
     { id: uid(), type: "disciple", name: "Sujit Bandari", role: "building", lat: 32.7767, lng: -96.797, place: "Dallas, TX",
-      health: "green", notes: "Walking closely; growing in leadership.", checkins: [
+      soil: "green", notes: "Walking closely; growing in leadership.", checkins: [
         { date: "2026-07-28", note: "Phone call — encouraged, praying through next steps." }] },
     { id: uid(), type: "disciple", name: "Disciple — Honolulu", role: "building", lat: 21.3069, lng: -157.8583, place: "Honolulu, HI",
-      health: "yellow", notes: "Part of the Hawaii discipleship cycle.", checkins: [
+      soil: "yellow", notes: "Part of the Hawaii discipleship cycle.", checkins: [
         { date: "2026-06-15", note: "Met during Hawaii trip." }] },
     { id: uid(), type: "church", name: "Church — Hawaii", role: "building", lat: 21.4389, lng: -158.0001, place: "Oahu, HI",
       health: "green", notes: "Cycle of discipleship & church care in Hawaii.", checkins: [] },
@@ -24,13 +24,55 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) return migrate(JSON.parse(raw));
     } catch (e) {}
     const s = seed();
     localStorage.setItem(STORE_KEY, JSON.stringify(s));
     return s;
   }
+  // disciples used to carry a generic `health`; it now reads as soil
+  function migrate(items) {
+    items.forEach(i => {
+      if (i.type === "disciple" && !i.soil) i.soil = i.health === "gray" ? "unset" : (i.health || "unset");
+    });
+    return items;
+  }
   function save() { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+
+  // ---------- the four soils (Matthew 13:3–23) ----------
+  const SOILS = {
+    green: {
+      light: "Green light",
+      soil: "Good soil",
+      short: "Bearing fruit",
+      desc: "Hears the word, understands it, and bears fruit — thirty, sixty, a hundredfold. Keep sowing; give them more to carry.",
+    },
+    yellow: {
+      light: "Yellow light",
+      soil: "Thorny ground",
+      short: "Crowded out",
+      desc: "The word took root, but the cares of this world and the deceitfulness of riches are choking it. Fruitfulness is stalling. Help them pull weeds.",
+    },
+    red: {
+      light: "Red light",
+      soil: "Rocky ground",
+      short: "No root",
+      desc: "Received the word with joy, but has no root in themselves. When trouble or persecution comes, they fall away. Depth is the need, not more excitement.",
+    },
+    black: {
+      light: "Black light",
+      soil: "The path",
+      short: "Word snatched",
+      desc: "The word is heard but not understood, and the enemy carries it off before it can take root. The ground itself must be broken up first.",
+    },
+    unset: {
+      light: "Not yet discerned",
+      soil: "Unknown soil",
+      short: "Unknown",
+      desc: "You haven't marked a soil for them yet.",
+    },
+  };
+  const SOIL_ORDER = ["green", "yellow", "red", "black"];
 
   // ---------- state ----------
   let view = "disciples"; // disciples | churches
@@ -54,9 +96,15 @@
     }
   });
 
-  function healthClass(item) {
-    return "dot-" + (item.health || "gray");
+  // disciples are marked by soil, churches by health — both drive the same dot
+  function statusKey(item) {
+    if (item.type === "disciple") {
+      const s = item.soil || "unset";
+      return s === "unset" ? "gray" : s;
+    }
+    return item.health || "gray";
   }
+  function statusClass(item) { return "dot-" + statusKey(item); }
 
   function renderMarkers() {
     markers.forEach(m => map.removeLayer(m));
@@ -65,7 +113,7 @@
     items.forEach(item => {
       const icon = L.divIcon({
         className: "",
-        html: `<div class="pin ${item.type}"><span>${item.type === "disciple" ? "🧑" : "⛪️"}</span><i class="health-dot ${healthClass(item)}"></i></div>`,
+        html: `<div class="pin ${item.type}"><span>${item.type === "disciple" ? "🧑" : "⛪️"}</span><i class="health-dot ${statusClass(item)}"></i></div>`,
         iconSize: [34, 34],
         iconAnchor: [8, 32],
       });
@@ -117,11 +165,38 @@
         <div class="info">
           <div class="name">${esc(i.name)}</div>
           <div class="meta">${esc(i.place || "")} · ${i.role === "building" ? "Building" : "Blessing"} · ${followupLabel(i)}</div>
+          ${i.type === "disciple" ? `<div class="meta soil-line"><i class="soil-chip ${statusClass(i)}"></i>${esc(SOILS[i.soil || "unset"].soil)}</div>` : ""}
         </div>
-        <div class="health ${healthClass(i)}" style="background: var(--${i.health === 'gray' ? 'text-dim' : i.health})"></div>
+        <div class="health ${statusClass(i)}"></div>
       </div>`).join("");
     wrap.querySelectorAll(".card").forEach(c =>
       c.addEventListener("click", () => openDetail(c.dataset.id)));
+  }
+
+  // ---------- soil panel (disciples only) ----------
+  function soilPanel(item) {
+    const key = item.soil || "unset";
+    const s = SOILS[key];
+    return `
+      <div class="soil-panel">
+        <div class="soil-head">
+          <span class="soil-lamp dot-${statusKey(item)}"></span>
+          <div>
+            <div class="soil-light">${esc(s.light)}</div>
+            <div class="soil-name">${esc(s.soil)}</div>
+          </div>
+        </div>
+        <p class="soil-desc">${esc(s.desc)}</p>
+        <div class="soil-ref">Parable of the Sower · Matthew 13:3–23</div>
+        <div class="section-label" style="margin-bottom:8px">Change soil</div>
+        <div class="soil-picker" id="d-soil">
+          ${SOIL_ORDER.map(k => `
+            <button data-s="${k}" class="soil-opt ${key === k ? "active" : ""}" title="${esc(SOILS[k].soil)}">
+              <span class="soil-lamp dot-${k}"></span>
+              <span class="soil-opt-label">${esc(SOILS[k].soil)}</span>
+            </button>`).join("")}
+        </div>
+      </div>`;
   }
 
   // ---------- detail sheet ----------
@@ -135,8 +210,11 @@
       <div class="sub">${esc(item.place || "")}</div>
       <div class="badges">
         <span class="badge ${item.role}">${item.role === "building" ? "🔨 Building" : "🕊️ Blessing"}</span>
-        <span class="badge h-${item.health}">● ${HEALTH_LABEL[item.health] || "Unknown"}</span>
+        ${item.type === "disciple"
+          ? `<span class="badge h-${statusKey(item)}">● ${esc(SOILS[item.soil || "unset"].light)}</span>`
+          : `<span class="badge h-${item.health}">● ${HEALTH_LABEL[item.health] || "Unknown"}</span>`}
       </div>
+      ${item.type === "disciple" ? soilPanel(item) : ""}
       <div class="stat-row">
         <div class="stat"><div class="v">${(item.checkins || []).length}</div><div class="k">Check-ins</div></div>
         <div class="stat"><div class="v">${lc ? daysSince(lc.date) + "d" : "—"}</div><div class="k">Since last</div></div>
@@ -155,6 +233,13 @@
         <button class="btn danger" id="d-delete">Delete</button>
       </div>`;
     openSheet("#sheet");
+    if (item.type === "disciple") {
+      $("#d-soil").querySelectorAll(".soil-opt").forEach(b => b.onclick = () => {
+        item.soil = b.dataset.s;
+        save(); renderMarkers(); renderList();
+        openDetail(item.id); // re-render with the new soil in place
+      });
+    }
     $("#d-checkin").onclick = () => { closeSheets(); openCheckinForm(item.id); };
     $("#d-edit").onclick = () => { closeSheets(); openForm(item.id); };
     $("#d-delete").onclick = () => {
@@ -175,27 +260,51 @@
       <input type="date" id="f-date" value="${today}" />
       <label>Note</label>
       <textarea id="f-note" placeholder="How are they doing? What did you talk about?"></textarea>
-      <label>Health</label>
-      <div class="seg" id="f-health">
-        ${["green", "yellow", "red"].map(h => `<button data-h="${h}" class="${item.health === h ? "active" : ""}">${HEALTH_LABEL[h]}</button>`).join("")}
-      </div>
+      ${item.type === "disciple" ? `
+        <label>Soil today</label>
+        <div class="soil-picker" id="f-soil">
+          ${SOIL_ORDER.map(k => `
+            <button data-s="${k}" class="soil-opt ${(item.soil || "unset") === k ? "active" : ""}">
+              <span class="soil-lamp dot-${k}"></span>
+              <span class="soil-opt-label">${esc(SOILS[k].soil)}</span>
+            </button>`).join("")}
+        </div>
+        <div class="soil-hint" id="f-soil-hint">${esc(SOILS[item.soil || "unset"].desc)}</div>
+      ` : `
+        <label>Health</label>
+        <div class="seg" id="f-health">
+          ${["green", "yellow", "red"].map(h => `<button data-h="${h}" class="${item.health === h ? "active" : ""}">${HEALTH_LABEL[h]}</button>`).join("")}
+        </div>
+      `}
       <div class="btn-row">
         <button class="btn" id="f-cancel">Cancel</button>
         <button class="btn primary" id="f-save">Save check-in</button>
       </div>`;
     openSheet("#form-sheet");
-    let health = item.health;
-    $("#f-health").querySelectorAll("button").forEach(b => b.onclick = () => {
-      $("#f-health").querySelectorAll("button").forEach(x => x.classList.remove("active"));
-      b.classList.add("active"); health = b.dataset.h;
-    });
-    $("#f-cancel").onclick = closeSheets;
+    let health = item.health, soil = item.soil || "unset";
+    if (item.type === "disciple") {
+      soilWire("#f-soil", "#f-soil-hint", v => soil = v);
+    } else {
+      segWire("#f-health", "h", v => health = v);
+    }
+    $("#f-cancel").onclick = () => closeSheets();
     $("#f-save").onclick = () => {
       item.checkins = item.checkins || [];
       item.checkins.push({ date: $("#f-date").value || today, note: $("#f-note").value.trim() });
-      item.health = health;
+      if (item.type === "disciple") item.soil = soil; else item.health = health;
       save(); closeSheets(); refresh(); openDetail(item.id);
     };
+  }
+
+  // shared wiring for the four-light soil picker
+  function soilWire(sel, hintSel, cb) {
+    $(sel).querySelectorAll(".soil-opt").forEach(b => b.onclick = () => {
+      $(sel).querySelectorAll(".soil-opt").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      const v = b.dataset.s;
+      if (hintSel && $(hintSel)) $(hintSel).textContent = SOILS[v].desc;
+      cb(v);
+    });
   }
 
   function openForm(id) {
@@ -217,10 +326,22 @@
         <button data-r="blessing" class="${editing?.role === "blessing" ? "active" : ""}">🕊️ Blessing</button>
       </div>
       <div class="loc-display" style="margin-top:4px">${ROLE_LABEL.building} vs ${ROLE_LABEL.blessing}</div>
-      <label>Health</label>
-      <div class="seg" id="f-health">
-        ${["green", "yellow", "red", "gray"].map(h => `<button data-h="${h}" class="${(editing?.health || "gray") === h ? "active" : ""}">${HEALTH_LABEL[h]}</button>`).join("")}
-      </div>
+      ${type === "disciple" ? `
+        <label>Soil — what ground are they?</label>
+        <div class="soil-picker" id="f-soil">
+          ${SOIL_ORDER.map(k => `
+            <button data-s="${k}" class="soil-opt ${(editing?.soil || "unset") === k ? "active" : ""}">
+              <span class="soil-lamp dot-${k}"></span>
+              <span class="soil-opt-label">${esc(SOILS[k].soil)}</span>
+            </button>`).join("")}
+        </div>
+        <div class="soil-hint" id="f-soil-hint">${esc(SOILS[editing?.soil || "unset"].desc)}</div>
+      ` : `
+        <label>Health</label>
+        <div class="seg" id="f-health">
+          ${["green", "yellow", "red", "gray"].map(h => `<button data-h="${h}" class="${(editing?.health || "gray") === h ? "active" : ""}">${HEALTH_LABEL[h]}</button>`).join("")}
+        </div>
+      `}
       <label>Notes</label>
       <textarea id="f-notes" placeholder="Background, prayer points, context…">${esc(editing?.notes || "")}</textarea>
       <label>Location</label>
@@ -234,8 +355,10 @@
 
     let role = editing?.role || "building";
     let health = editing?.health || "gray";
+    let soil = editing?.soil || "unset";
     segWire("#f-role", "r", v => role = v);
-    segWire("#f-health", "h", v => health = v);
+    if (type === "disciple") soilWire("#f-soil", "#f-soil-hint", v => soil = v);
+    else segWire("#f-health", "h", v => health = v);
 
     // --- place autocomplete: typing a place sets the pin automatically ---
     const placeInput = $("#f-place");
@@ -318,10 +441,12 @@
         }
       }
       if (!loc) { alert("Type a place to search for it, or tap the map to drop a pin."); return; }
+      const fields = { name, place: $("#f-place").value.trim(), role, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng };
+      if (type === "disciple") fields.soil = soil; else fields.health = health;
       if (editing) {
-        Object.assign(editing, { name, place: $("#f-place").value.trim(), role, health, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng });
+        Object.assign(editing, fields);
       } else {
-        data.push({ id: uid(), type, name, place: $("#f-place").value.trim(), role, health, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng, checkins: [] });
+        data.push({ id: uid(), type, ...fields, checkins: [] });
       }
       save(); clearPreviewPin(); closeSheets(); refresh();
     };

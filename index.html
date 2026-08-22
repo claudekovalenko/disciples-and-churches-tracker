@@ -16,6 +16,7 @@
 <header class="topbar">
   <h1 id="page-title">Disciples</h1>
   <div class="topbar-actions">
+    <button id="btn-goals" class="icon-btn" title="Targets" aria-label="Targets">🎯</button>
     <button id="btn-list" class="icon-btn" title="Toggle list view" aria-label="Toggle list view">☰</button>
     <button id="btn-add" class="icon-btn accent" title="Add new" aria-label="Add new">+</button>
   </div>
@@ -33,6 +34,12 @@
   <section id="sheet" class="sheet" aria-hidden="true">
     <div class="sheet-grab"></div>
     <div id="sheet-content"></div>
+  </section>
+
+  <!-- targets sheet -->
+  <section id="goals-sheet" class="sheet" aria-hidden="true">
+    <div class="sheet-grab"></div>
+    <div id="goals-content"></div>
   </section>
 
   <!-- add/edit form sheet -->

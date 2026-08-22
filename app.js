@@ -5,17 +5,19 @@
   // ---------- data ----------
   const seed = () => ([
     { id: uid(), type: "disciple", name: "Sujit Bandari", role: "building", lat: 32.7767, lng: -96.797, place: "Dallas, TX",
-      soil: "green", notes: "Walking closely; growing in leadership.", checkins: [
-        { date: "2026-07-28", note: "Phone call — encouraged, praying through next steps." }] },
+      soil: "green", notes: "Walking closely; growing in leadership.",
+      training: { assurance: true, baptized: true, word: true, story: true, gospel: true, dbs: true },
+      checkins: [{ date: "2026-07-28", note: "Phone call — encouraged, praying through next steps." }] },
     { id: uid(), type: "disciple", name: "Disciple — Honolulu", role: "building", lat: 21.3069, lng: -157.8583, place: "Honolulu, HI",
-      soil: "yellow", notes: "Part of the Hawaii discipleship cycle.", checkins: [
-        { date: "2026-06-15", note: "Met during Hawaii trip." }] },
+      soil: "yellow", notes: "Part of the Hawaii discipleship cycle.",
+      training: { assurance: true, baptized: true, word: true },
+      checkins: [{ date: "2026-06-15", note: "Met during Hawaii trip." }] },
     { id: uid(), type: "church", name: "Church — Hawaii", role: "building", lat: 21.4389, lng: -158.0001, place: "Oahu, HI",
-      health: "green", notes: "Cycle of discipleship & church care in Hawaii.", checkins: [] },
+      health: "green", kind: "house", formed: "2025-11", notes: "Cycle of discipleship & church care in Hawaii.", checkins: [] },
     { id: uid(), type: "church", name: "Church — California", role: "blessing", lat: 34.0522, lng: -118.2437, place: "Los Angeles, CA",
-      health: "yellow", notes: "Contributing toward / blessing this work.", checkins: [] },
+      health: "yellow", kind: "established", notes: "Contributing toward / blessing this work.", checkins: [] },
     { id: uid(), type: "church", name: "Church — Japan", role: "blessing", lat: 35.6762, lng: 139.6503, place: "Tokyo, Japan",
-      health: "gray", notes: "Early connection in Japan.", checkins: [] },
+      health: "gray", kind: "house", formed: "2026-03", notes: "Early connection in Japan.", checkins: [] },
   ]);
 
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
@@ -34,6 +36,8 @@
   function migrate(items) {
     items.forEach(i => {
       if (i.type === "disciple" && !i.soil) i.soil = i.health === "gray" ? "unset" : (i.health || "unset");
+      if (i.type === "disciple" && !i.training) i.training = {};
+      if (i.type === "church" && !i.kind) i.kind = "established";
     });
     return items;
   }
@@ -74,6 +78,63 @@
   };
   const SOIL_ORDER = ["green", "yellow", "red", "black"];
 
+  // ---------- target 1: fully trained disciples ----------
+  // A disciple is "fully trained" once every tool below has been handed over.
+  const TRAINING = [
+    { id: "assurance", label: "Assurance of salvation", hint: "Knows they are His, and why." },
+    { id: "baptized", label: "Baptized", hint: "Publicly buried and raised with Christ." },
+    { id: "word", label: "Daily Word & prayer", hint: "Feeding themselves, not waiting to be fed." },
+    { id: "story", label: "Shares their testimony", hint: "Can tell their story in a few minutes." },
+    { id: "gospel", label: "Shares the gospel", hint: "Can open the gospel with a stranger." },
+    { id: "dbs", label: "Leads a Bible study", hint: "Can facilitate discovery, not just attend." },
+    { id: "disciples", label: "Discipling someone else", hint: "Has their own person they are stewarding." },
+    { id: "gathers", label: "Ready to gather a house church", hint: "Equipped to start and shepherd a gathering." },
+  ];
+
+  function trainedCount(item) {
+    const t = item.training || {};
+    return TRAINING.filter(m => t[m.id]).length;
+  }
+  function isFullyTrained(item) {
+    return item.type === "disciple" && trainedCount(item) === TRAINING.length;
+  }
+
+  // ---------- target 2: house churches formed ----------
+  const CHURCH_KINDS = {
+    house: { label: "House church", icon: "🏠", desc: "A gathering formed in a home." },
+    established: { label: "Established church", icon: "⛪️", desc: "An existing congregation." },
+  };
+  function isHouseChurch(item) { return item.type === "church" && (item.kind || "established") === "house"; }
+  function churchIcon(item) { return isHouseChurch(item) ? "🏠" : "⛪️"; }
+
+  // ---------- targets (editable goals) ----------
+  const TARGETS_KEY = "shepherd.targets.v1";
+  let targets = loadTargets();
+  function loadTargets() {
+    try {
+      const raw = localStorage.getItem(TARGETS_KEY);
+      if (raw) return { houseChurches: 10, trainedDisciples: 10, ...JSON.parse(raw) };
+    } catch (e) {}
+    return { houseChurches: 10, trainedDisciples: 10 };
+  }
+  function saveTargets() { localStorage.setItem(TARGETS_KEY, JSON.stringify(targets)); }
+
+  function progress() {
+    const disciples = data.filter(d => d.type === "disciple");
+    const churches = data.filter(d => d.type === "church");
+    const trained = disciples.filter(isFullyTrained);
+    const houses = churches.filter(isHouseChurch);
+    return {
+      disciples, churches, trained, houses,
+      trainedN: trained.length, housesN: houses.length,
+      // everyone who has started but not finished, most-complete first
+      inTraining: disciples
+        .filter(d => !isFullyTrained(d))
+        .map(d => ({ item: d, done: trainedCount(d) }))
+        .sort((a, b) => b.done - a.done),
+    };
+  }
+
   // ---------- state ----------
   let view = "disciples"; // disciples | churches
   let listOpen = false;
@@ -113,7 +174,7 @@
     items.forEach(item => {
       const icon = L.divIcon({
         className: "",
-        html: `<div class="pin ${item.type}"><span>${item.type === "disciple" ? "🧑" : "⛪️"}</span><i class="health-dot ${statusClass(item)}"></i></div>`,
+        html: `<div class="pin ${item.type}${isHouseChurch(item) ? " house" : ""}${isFullyTrained(item) ? " trained" : ""}"><span>${item.type === "disciple" ? "🧑" : churchIcon(item)}</span><i class="health-dot ${statusClass(item)}"></i></div>`,
         iconSize: [34, 34],
         iconAnchor: [8, 32],
       });
@@ -159,18 +220,25 @@
       wrap.innerHTML = `<div class="empty-msg">Nothing here yet.<br>Tap + to add your first ${type}.</div>`;
       return;
     }
-    wrap.innerHTML = items.map(i => `
+    wrap.innerHTML = goalStrip() + items.map(i => {
+      const done = trainedCount(i), full = isFullyTrained(i);
+      return `
       <div class="card" data-id="${i.id}">
-        <div class="avatar ${i.type}">${i.type === "disciple" ? "🧑" : "⛪️"}</div>
+        <div class="avatar ${i.type}">${i.type === "disciple" ? "🧑" : churchIcon(i)}</div>
         <div class="info">
-          <div class="name">${esc(i.name)}</div>
+          <div class="name">${esc(i.name)}${full ? ` <span class="tag trained-tag">Fully trained</span>` : ""}${isHouseChurch(i) ? ` <span class="tag house-tag">House church</span>` : ""}</div>
           <div class="meta">${esc(i.place || "")} · ${i.role === "building" ? "Building" : "Blessing"} · ${followupLabel(i)}</div>
-          ${i.type === "disciple" ? `<div class="meta soil-line"><i class="soil-chip ${statusClass(i)}"></i>${esc(SOILS[i.soil || "unset"].soil)}</div>` : ""}
+          ${i.type === "disciple" ? `
+            <div class="meta soil-line"><i class="soil-chip ${statusClass(i)}"></i>${esc(SOILS[i.soil || "unset"].soil)}</div>
+            <div class="mini-bar" title="${done} of ${TRAINING.length} tools"><span style="width:${(done / TRAINING.length) * 100}%"></span></div>
+            <div class="meta mini-bar-label">${done}/${TRAINING.length} tools trained</div>` : ""}
         </div>
         <div class="health ${statusClass(i)}"></div>
-      </div>`).join("");
+      </div>`; }).join("");
     wrap.querySelectorAll(".card").forEach(c =>
       c.addEventListener("click", () => openDetail(c.dataset.id)));
+    const strip = $("#goal-strip");
+    if (strip) strip.onclick = openGoals;
   }
 
   // ---------- soil panel (disciples only) ----------
@@ -199,6 +267,84 @@
       </div>`;
   }
 
+  // compact progress banner at the top of the list for whichever target is in view
+  function goalStrip() {
+    const p = progress();
+    const isD = view === "disciples";
+    const have = isD ? p.trainedN : p.housesN;
+    const goal = isD ? targets.trainedDisciples : targets.houseChurches;
+    const label = isD ? "fully trained disciples" : "house churches formed";
+    const pct = goal > 0 ? Math.min(100, (have / goal) * 100) : 0;
+    return `
+      <button class="goal-strip" id="goal-strip">
+        <div class="goal-strip-top">
+          <span class="goal-strip-label">🎯 ${have} of ${goal} ${label}</span>
+          <span class="goal-strip-pct">${Math.round(pct)}%</span>
+        </div>
+        <div class="bar"><span style="width:${pct}%"></span></div>
+      </button>`;
+  }
+
+  // ---------- target 1 panel: the training toolset ----------
+  function trainingPanel(item) {
+    const done = trainedCount(item), total = TRAINING.length, full = done === total;
+    const pct = (done / total) * 100;
+    return `
+      <div class="goal-panel ${full ? "complete" : ""}">
+        <div class="goal-panel-head">
+          <div>
+            <div class="goal-panel-title">${full ? "✅ Fully trained" : "Training toolset"}</div>
+            <div class="goal-panel-sub">${done} of ${total} tools handed over</div>
+          </div>
+          <div class="goal-ring" style="--pct:${pct}"><span>${done}/${total}</span></div>
+        </div>
+        <div class="bar"><span style="width:${pct}%"></span></div>
+        <div class="tool-list" id="d-training">
+          ${TRAINING.map(m => {
+            const on = !!(item.training || {})[m.id];
+            return `
+            <button class="tool ${on ? "on" : ""}" data-m="${m.id}">
+              <span class="tool-check">${on ? "✓" : ""}</span>
+              <span class="tool-text">
+                <span class="tool-label">${esc(m.label)}</span>
+                <span class="tool-hint">${esc(m.hint)}</span>
+              </span>
+            </button>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+
+  // ---------- target 2 panel: house church ----------
+  function churchPanel(item) {
+    const house = isHouseChurch(item);
+    return `
+      <div class="goal-panel ${house ? "complete" : ""}">
+        <div class="goal-panel-head">
+          <div>
+            <div class="goal-panel-title">${house ? "🏠 House church formed" : "⛪️ Established church"}</div>
+            <div class="goal-panel-sub">${house
+              ? (item.formed ? `Formed ${esc(monthLabel(item.formed))}` : "Formed — date not set")
+              : "Not counted toward the house-church target"}</div>
+          </div>
+        </div>
+        <div class="seg" id="d-kind" style="margin-top:12px">
+          ${Object.entries(CHURCH_KINDS).map(([k, v]) =>
+            `<button data-k="${k}" class="${(item.kind || "established") === k ? "active" : ""}">${v.icon} ${v.label}</button>`).join("")}
+        </div>
+        ${house ? `
+          <label style="margin-top:12px">Month formed</label>
+          <input type="month" id="d-formed" value="${esc(item.formed || "")}" />` : ""}
+      </div>`;
+  }
+
+  function monthLabel(ym) {
+    if (!ym) return "";
+    const [y, m] = ym.split("-");
+    const names = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    return `${names[parseInt(m, 10) - 1] || ""} ${y}`.trim();
+  }
+
   // ---------- detail sheet ----------
   function openDetail(id) {
     const item = data.find(d => d.id === id);
@@ -215,6 +361,7 @@
           : `<span class="badge h-${item.health}">● ${HEALTH_LABEL[item.health] || "Unknown"}</span>`}
       </div>
       ${item.type === "disciple" ? soilPanel(item) : ""}
+      ${item.type === "disciple" ? trainingPanel(item) : churchPanel(item)}
       <div class="stat-row">
         <div class="stat"><div class="v">${(item.checkins || []).length}</div><div class="k">Check-ins</div></div>
         <div class="stat"><div class="v">${lc ? daysSince(lc.date) + "d" : "—"}</div><div class="k">Since last</div></div>
@@ -239,6 +386,28 @@
         save(); renderMarkers(); renderList();
         openDetail(item.id); // re-render with the new soil in place
       });
+      // tap a tool to mark it trained
+      $("#d-training").querySelectorAll(".tool").forEach(b => b.onclick = () => {
+        const wasFull = isFullyTrained(item);
+        item.training = item.training || {};
+        const id = b.dataset.m;
+        if (item.training[id]) delete item.training[id]; else item.training[id] = true;
+        save(); renderMarkers(); renderList();
+        const nowFull = isFullyTrained(item);
+        openDetail(item.id);
+        if (!wasFull && nowFull) celebrate();
+      });
+    } else {
+      $("#d-kind").querySelectorAll("button").forEach(b => b.onclick = () => {
+        const wasHouse = isHouseChurch(item);
+        item.kind = b.dataset.k;
+        if (item.kind === "house" && !item.formed) item.formed = new Date().toISOString().slice(0, 7);
+        save(); renderMarkers(); renderList();
+        openDetail(item.id);
+        if (!wasHouse && isHouseChurch(item)) celebrate();
+      });
+      const formed = $("#d-formed");
+      if (formed) formed.onchange = () => { item.formed = formed.value; save(); renderList(); };
     }
     $("#d-checkin").onclick = () => { closeSheets(); openCheckinForm(item.id); };
     $("#d-edit").onclick = () => { closeSheets(); openForm(item.id); };
@@ -248,6 +417,99 @@
         save(); closeSheets(); refresh();
       }
     };
+  }
+
+  // ---------- targets sheet ----------
+  function openGoals() {
+    const p = progress();
+    $("#goals-content").innerHTML = `
+      <h2>Targets</h2>
+      <div class="sub">The two things you are actually moving toward.</div>
+
+      <div id="goal-cards">${goalCards()}</div>
+
+      <div class="section-label">House churches (${p.housesN})</div>
+      <div class="timeline">
+        ${p.houses.length ? p.houses.map(c => `
+          <div class="goal-row" data-id="${c.id}">
+            <span class="goal-row-name">🏠 ${esc(c.name)}</span>
+            <span class="goal-row-meta">${esc(c.formed ? monthLabel(c.formed) : c.place || "")}</span>
+          </div>`).join("")
+        : `<div class="empty-msg" style="padding:14px">None yet. Mark a church as a house church to count it.</div>`}
+      </div>
+
+      <div class="section-label">Closest to fully trained</div>
+      <div class="timeline">
+        ${p.trained.map(d => `
+          <div class="goal-row done" data-id="${d.id}">
+            <span class="goal-row-name">✅ ${esc(d.name)}</span>
+            <span class="goal-row-meta">${TRAINING.length}/${TRAINING.length}</span>
+          </div>`).join("")}
+        ${p.inTraining.length ? p.inTraining.map(({ item, done }) => `
+          <div class="goal-row" data-id="${item.id}">
+            <span class="goal-row-name">${esc(item.name)}</span>
+            <span class="goal-row-bar"><span class="bar"><span style="width:${(done / TRAINING.length) * 100}%"></span></span></span>
+            <span class="goal-row-meta">${done}/${TRAINING.length}</span>
+          </div>`).join("")
+        : (p.trained.length ? "" : `<div class="empty-msg" style="padding:14px">No disciples yet.</div>`)}
+      </div>
+
+      <div class="section-label">Adjust targets</div>
+      <div class="target-edit">
+        <label>House churches</label>
+        <input type="number" id="t-houses" min="1" max="999" value="${targets.houseChurches}" />
+        <label>Fully trained disciples</label>
+        <input type="number" id="t-trained" min="1" max="999" value="${targets.trainedDisciples}" />
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" id="g-close">Done</button>
+      </div>`;
+    openSheet("#goals-sheet");
+
+    const commit = () => {
+      const h = parseInt($("#t-houses").value, 10), t = parseInt($("#t-trained").value, 10);
+      if (h > 0) targets.houseChurches = h;
+      if (t > 0) targets.trainedDisciples = t;
+      saveTargets();
+      // refresh just the cards so the open sheet stays put and inputs keep focus
+      $("#goal-cards").innerHTML = goalCards();
+      renderList();
+    };
+    $("#t-houses").oninput = commit;
+    $("#t-trained").oninput = commit;
+    $("#g-close").onclick = () => { commit(); closeSheets(); };
+    $("#goals-content").querySelectorAll(".goal-row").forEach(r =>
+      r.onclick = () => { closeSheets(); openDetail(r.dataset.id); });
+  }
+
+  function goalCards() {
+    const p = progress();
+    return goalCard("🏠", "House churches formed", p.housesN, targets.houseChurches)
+         + goalCard("🎓", "Fully trained disciples", p.trainedN, targets.trainedDisciples);
+  }
+
+  function goalCard(icon, label, have, goal) {
+    const pct = goal > 0 ? Math.min(100, (have / goal) * 100) : 0;
+    const hit = have >= goal;
+    return `
+      <div class="goal-card ${hit ? "hit" : ""}">
+        <div class="goal-card-head">
+          <span class="goal-card-icon">${icon}</span>
+          <span class="goal-card-label">${label}</span>
+        </div>
+        <div class="goal-card-num"><b>${have}</b><span>of ${goal}</span></div>
+        <div class="bar big"><span style="width:${pct}%"></span></div>
+        <div class="goal-card-foot">${hit ? "🎉 Target reached" : `${goal - have} to go`}</div>
+      </div>`;
+  }
+
+  // a brief flourish when a target-moving milestone lands
+  function celebrate() {
+    const el = document.createElement("div");
+    el.className = "celebrate";
+    el.textContent = "🎉";
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1400);
   }
 
   // ---------- forms ----------
@@ -337,6 +599,11 @@
         </div>
         <div class="soil-hint" id="f-soil-hint">${esc(SOILS[editing?.soil || "unset"].desc)}</div>
       ` : `
+        <label>Kind of church</label>
+        <div class="seg" id="f-kind">
+          ${Object.entries(CHURCH_KINDS).map(([k, v]) =>
+            `<button data-k="${k}" class="${(editing?.kind || "established") === k ? "active" : ""}">${v.icon} ${v.label}</button>`).join("")}
+        </div>
         <label>Health</label>
         <div class="seg" id="f-health">
           ${["green", "yellow", "red", "gray"].map(h => `<button data-h="${h}" class="${(editing?.health || "gray") === h ? "active" : ""}">${HEALTH_LABEL[h]}</button>`).join("")}
@@ -357,8 +624,13 @@
     let health = editing?.health || "gray";
     let soil = editing?.soil || "unset";
     segWire("#f-role", "r", v => role = v);
-    if (type === "disciple") soilWire("#f-soil", "#f-soil-hint", v => soil = v);
-    else segWire("#f-health", "h", v => health = v);
+    let kind = editing?.kind || "established";
+    if (type === "disciple") {
+      soilWire("#f-soil", "#f-soil-hint", v => soil = v);
+    } else {
+      segWire("#f-health", "h", v => health = v);
+      segWire("#f-kind", "k", v => kind = v);
+    }
 
     // --- place autocomplete: typing a place sets the pin automatically ---
     const placeInput = $("#f-place");
@@ -442,7 +714,14 @@
       }
       if (!loc) { alert("Type a place to search for it, or tap the map to drop a pin."); return; }
       const fields = { name, place: $("#f-place").value.trim(), role, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng };
-      if (type === "disciple") fields.soil = soil; else fields.health = health;
+      if (type === "disciple") {
+        fields.soil = soil;
+        fields.training = editing?.training || {};
+      } else {
+        fields.health = health;
+        fields.kind = kind;
+        if (kind === "house") fields.formed = editing?.formed || new Date().toISOString().slice(0, 7);
+      }
       if (editing) {
         Object.assign(editing, fields);
       } else {
@@ -548,6 +827,7 @@
   function closeSheets(soft) {
     $("#sheet").classList.remove("open");
     $("#form-sheet").classList.remove("open");
+    $("#goals-sheet").classList.remove("open");
     if (!soft) $("#scrim").classList.remove("show");
   }
   $("#scrim").addEventListener("click", () => { pickingLocation = null; hideTapHint(); closeSheets(); });
@@ -571,6 +851,7 @@
     $("#list-panel").classList.toggle("open", listOpen);
   });
   $("#btn-add").addEventListener("click", () => openForm(null));
+  $("#btn-goals").addEventListener("click", openGoals);
 
   function refresh() { renderMarkers(); renderList(); }
   refresh();

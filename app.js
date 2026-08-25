@@ -4,14 +4,7 @@
 
   // ---------- data ----------
   const seed = () => ([
-    { id: uid(), type: "disciple", name: "Sujit Bandari", role: "building", lat: 32.7767, lng: -96.797, place: "Dallas, TX",
-      soil: "green", notes: "Walking closely; growing in leadership.",
-      training: { assurance: true, baptized: true, word: true, story: true, gospel: true, dbs: true },
-      checkins: [{ date: "2026-07-28", note: "Phone call — encouraged, praying through next steps." }] },
-    { id: uid(), type: "disciple", name: "Disciple — Honolulu", role: "building", lat: 21.3069, lng: -157.8583, place: "Honolulu, HI",
-      soil: "yellow", notes: "Part of the Hawaii discipleship cycle.",
-      training: { assurance: true, baptized: true, word: true },
-      checkins: [{ date: "2026-06-15", note: "Met during Hawaii trip." }] },
+    ...FOCUS_DISCIPLES.map(d => ({ ...d, id: uid(), type: "disciple", role: "building", focus: true, checkins: [] })),
     { id: uid(), type: "church", name: "Church — Hawaii", role: "building", lat: 21.4389, lng: -158.0001, place: "Oahu, HI",
       health: "green", kind: "house", formed: "2025-11", notes: "Cycle of discipleship & church care in Hawaii.", checkins: [] },
     { id: uid(), type: "church", name: "Church — California", role: "blessing", lat: 34.0522, lng: -118.2437, place: "Los Angeles, CA",
@@ -22,11 +15,55 @@
 
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
+  // ---------- the people you are actually focused on ----------
+  // lat/lng may be null — "location not set yet" is a first-class state.
+  const FOCUS_DISCIPLES = [
+    { name: "Sujit Bandari", place: "Dallas, TX", lat: 32.7767, lng: -96.797, soil: "green",
+      notes: "Walking closely; growing in leadership.",
+      training: { assurance: true, baptized: true, word: true, story: true, gospel: true, dbs: true } },
+    { name: "Isaac", place: "", lat: null, lng: null, soil: "unset",
+      notes: "Location still to be confirmed.", training: {} },
+    { name: "Becca", place: "Mongolia", lat: 47.8864, lng: 106.9057, soil: "unset",
+      notes: "Serving in Mongolia.", training: {} },
+    { name: "Gavin", place: "", lat: null, lng: null, soil: "unset",
+      notes: "", training: {} },
+  ];
+
+  // Runs once. Adds only the focus disciples you don't already have (matched by
+  // first name), marks the ones you do have as focus, and never overwrites your
+  // own edits or re-adds someone you have deliberately deleted.
+  const FOCUS_SYNC_KEY = "shepherd.focusSync.v1";
+  function syncFocusDisciples(items) {
+    if (localStorage.getItem(FOCUS_SYNC_KEY)) return items;
+    const firstName = n => String(n || "").trim().toLowerCase().split(/\s+/)[0];
+    let changed = false;
+    FOCUS_DISCIPLES.forEach(fd => {
+      const key = firstName(fd.name);
+      const existing = items.find(i => i.type === "disciple" && firstName(i.name) === key);
+      if (existing) {
+        if (!existing.focus) { existing.focus = true; changed = true; } // yours already — only mark it
+      } else {
+        items.push({ ...fd, id: uid(), type: "disciple", role: "building", focus: true, checkins: [] });
+        changed = true;
+      }
+    });
+    // persist immediately, or the additions vanish on the next launch
+    if (changed) localStorage.setItem(STORE_KEY, JSON.stringify(items));
+    localStorage.setItem(FOCUS_SYNC_KEY, "1");
+    return items;
+  }
+
+  function firstWord(n) { return String(n || "").trim().split(/\s+/)[0] || "this"; }
+
+  function hasLocation(item) {
+    return typeof item.lat === "number" && typeof item.lng === "number";
+  }
+
   let data = load();
   function load() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) return migrate(JSON.parse(raw));
+      if (raw) return syncFocusDisciples(migrate(JSON.parse(raw)));
     } catch (e) {}
     const s = seed();
     localStorage.setItem(STORE_KEY, JSON.stringify(s));
@@ -170,11 +207,13 @@
   function renderMarkers() {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
-    const items = data.filter(d => d.type === (view === "disciples" ? "disciple" : "church"));
+    const items = data
+      .filter(d => d.type === (view === "disciples" ? "disciple" : "church"))
+      .filter(hasLocation);
     items.forEach(item => {
       const icon = L.divIcon({
         className: "",
-        html: `<div class="pin ${item.type}${isHouseChurch(item) ? " house" : ""}${isFullyTrained(item) ? " trained" : ""}"><span>${item.type === "disciple" ? "🧑" : churchIcon(item)}</span><i class="health-dot ${statusClass(item)}"></i></div>`,
+        html: `<div class="pin ${item.type}${isHouseChurch(item) ? " house" : ""}${isFullyTrained(item) ? " trained" : ""}${item.focus ? " focus" : ""}"><span>${item.type === "disciple" ? "🧑" : churchIcon(item)}</span><i class="health-dot ${statusClass(item)}"></i></div>`,
         iconSize: [34, 34],
         iconAnchor: [8, 32],
       });
@@ -186,6 +225,7 @@
       const b = L.latLngBounds(items.map(i => [i.lat, i.lng]));
       map.fitBounds(b.pad(0.35), { maxZoom: 6 });
     }
+    updateUnlocatedBanner();
   }
 
   // ---------- helpers ----------
@@ -220,21 +260,39 @@
       wrap.innerHTML = `<div class="empty-msg">Nothing here yet.<br>Tap + to add your first ${type}.</div>`;
       return;
     }
-    wrap.innerHTML = goalStrip() + items.map(i => {
+    // focus disciples lead the list, then everyone else
+    const focused = items.filter(i => i.focus);
+    const rest = items.filter(i => !i.focus);
+    const section = (title, arr) => arr.length
+      ? `<div class="list-section">${title}</div>` + arr.map(renderCard).join("")
+      : "";
+
+    wrap.innerHTML = goalStrip()
+      + (focused.length && rest.length
+          ? section(`⭐ Focus (${focused.length})`, focused) + section("Everyone else", rest)
+          : [...focused, ...rest].map(renderCard).join(""));
+
+    const unlocated = items.filter(i => !hasLocation(i));
+    if (unlocated.length) {
+      wrap.insertAdjacentHTML("beforeend",
+        `<div class="hint-note">📍 ${unlocated.length} ${unlocated.length === 1 ? "entry has" : "entries have"} no location yet — open ${unlocated.length === 1 ? "it" : "them"} to add one.</div>`);
+    }
+
+    function renderCard(i) {
       const done = trainedCount(i), full = isFullyTrained(i);
       return `
-      <div class="card" data-id="${i.id}">
+      <div class="card ${i.focus ? "is-focus" : ""}" data-id="${i.id}">
         <div class="avatar ${i.type}">${i.type === "disciple" ? "🧑" : churchIcon(i)}</div>
         <div class="info">
-          <div class="name">${esc(i.name)}${full ? ` <span class="tag trained-tag">Fully trained</span>` : ""}${isHouseChurch(i) ? ` <span class="tag house-tag">House church</span>` : ""}</div>
-          <div class="meta">${esc(i.place || "")} · ${i.role === "building" ? "Building" : "Blessing"} · ${followupLabel(i)}</div>
+          <div class="name">${i.focus ? `<span class="star">⭐</span>` : ""}${esc(i.name)}${full ? ` <span class="tag trained-tag">Fully trained</span>` : ""}${isHouseChurch(i) ? ` <span class="tag house-tag">House church</span>` : ""}</div>
+          <div class="meta">${hasLocation(i) ? esc(i.place || "Pinned") : `<span class="no-loc">📍 Location not set</span>`} · ${i.role === "building" ? "Building" : "Blessing"} · ${followupLabel(i)}</div>
           ${i.type === "disciple" ? `
             <div class="meta soil-line"><i class="soil-chip ${statusClass(i)}"></i>${esc(SOILS[i.soil || "unset"].soil)}</div>
             <div class="mini-bar" title="${done} of ${TRAINING.length} tools"><span style="width:${(done / TRAINING.length) * 100}%"></span></div>
             <div class="meta mini-bar-label">${done}/${TRAINING.length} tools trained</div>` : ""}
         </div>
         <div class="health ${statusClass(i)}"></div>
-      </div>`; }).join("");
+      </div>`; }
     wrap.querySelectorAll(".card").forEach(c =>
       c.addEventListener("click", () => openDetail(c.dataset.id)));
     const strip = $("#goal-strip");
@@ -352,8 +410,14 @@
     const lc = lastCheckin(item);
     const cks = [...(item.checkins || [])].sort((a, b) => b.date.localeCompare(a.date));
     $("#sheet-content").innerHTML = `
-      <h2>${esc(item.name)}</h2>
-      <div class="sub">${esc(item.place || "")}</div>
+      <h2>${item.focus ? `<span class="star">⭐</span>` : ""}${esc(item.name)}</h2>
+      <div class="sub">${hasLocation(item) ? esc(item.place || "Pinned on the map") : "📍 No location set yet"}</div>
+      ${item.type === "disciple" ? `
+        <button class="focus-toggle ${item.focus ? "on" : ""}" id="d-focus">
+          ${item.focus ? "⭐ Focus disciple" : "☆ Make a focus disciple"}
+        </button>` : ""}
+      ${!hasLocation(item) ? `
+        <button class="btn locate-btn" id="d-locate">📍 Set ${esc(firstWord(item.name))}'s location</button>` : ""}
       <div class="badges">
         <span class="badge ${item.role}">${item.role === "building" ? "🔨 Building" : "🕊️ Blessing"}</span>
         ${item.type === "disciple"
@@ -380,6 +444,13 @@
         <button class="btn danger" id="d-delete">Delete</button>
       </div>`;
     openSheet("#sheet");
+    const focusBtn = $("#d-focus");
+    if (focusBtn) focusBtn.onclick = () => {
+      item.focus = !item.focus;
+      save(); renderMarkers(); renderList(); openDetail(item.id);
+    };
+    const locateBtn = $("#d-locate");
+    if (locateBtn) locateBtn.onclick = () => { closeSheets(); openForm(item.id); };
     if (item.type === "disciple") {
       $("#d-soil").querySelectorAll(".soil-opt").forEach(b => b.onclick = () => {
         item.soil = b.dataset.s;
@@ -572,7 +643,8 @@
   function openForm(id) {
     const editing = id ? data.find(d => d.id === id) : null;
     const type = editing ? editing.type : (view === "disciples" ? "disciple" : "church");
-    let loc = editing ? { lat: editing.lat, lng: editing.lng } : null;
+    // null lat/lng means "no location yet" — don't treat it as a set location
+    let loc = editing && hasLocation(editing) ? { lat: editing.lat, lng: editing.lng } : null;
     $("#form-content").innerHTML = `
       <h2>${editing ? "Edit" : "New"} ${type}</h2>
       <label>Name</label>
@@ -598,6 +670,10 @@
             </button>`).join("")}
         </div>
         <div class="soil-hint" id="f-soil-hint">${esc(SOILS[editing?.soil || "unset"].desc)}</div>
+        <label>Focus</label>
+        <button type="button" class="focus-toggle ${editing?.focus ? "on" : ""}" id="f-focus">
+          ${editing?.focus ? "⭐ Focus disciple" : "☆ Not a focus disciple"}
+        </button>
       ` : `
         <label>Kind of church</label>
         <div class="seg" id="f-kind">
@@ -613,7 +689,7 @@
       <textarea id="f-notes" placeholder="Background, prayer points, context…">${esc(editing?.notes || "")}</textarea>
       <label>Location</label>
       <button class="btn" id="f-pick">📍 ${loc ? "Adjust pin on map" : "Or tap the map to set it"}</button>
-      <div class="loc-display" id="f-loc">${loc ? `<b>${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}</b>` : "Not set yet — type a place above"}</div>
+      <div class="loc-display" id="f-loc">${loc ? `<b>${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}</b>` : "Not set yet — optional, you can add it later"}</div>
       <div class="btn-row">
         <button class="btn" id="f-cancel">Cancel</button>
         <button class="btn primary" id="f-save">${editing ? "Save changes" : "Add"}</button>
@@ -625,8 +701,15 @@
     let soil = editing?.soil || "unset";
     segWire("#f-role", "r", v => role = v);
     let kind = editing?.kind || "established";
+    let focus = !!editing?.focus;
     if (type === "disciple") {
       soilWire("#f-soil", "#f-soil-hint", v => soil = v);
+      const fb = $("#f-focus");
+      fb.onclick = () => {
+        focus = !focus;
+        fb.classList.toggle("on", focus);
+        fb.textContent = focus ? "⭐ Focus disciple" : "☆ Not a focus disciple";
+      };
     } else {
       segWire("#f-health", "h", v => health = v);
       segWire("#f-kind", "k", v => kind = v);
@@ -712,10 +795,14 @@
           if (results.length) setLoc(results[0].lat, results[0].lng, results[0].label);
         }
       }
-      if (!loc) { alert("Type a place to search for it, or tap the map to drop a pin."); return; }
-      const fields = { name, place: $("#f-place").value.trim(), role, notes: $("#f-notes").value.trim(), lat: loc.lat, lng: loc.lng };
+      // a location is optional — "not set yet" is a valid state
+      const fields = {
+        name, place: $("#f-place").value.trim(), role, notes: $("#f-notes").value.trim(),
+        lat: loc ? loc.lat : null, lng: loc ? loc.lng : null,
+      };
       if (type === "disciple") {
         fields.soil = soil;
+        fields.focus = focus;
         fields.training = editing?.training || {};
       } else {
         fields.health = health;
@@ -852,6 +939,21 @@
   });
   $("#btn-add").addEventListener("click", () => openForm(null));
   $("#btn-goals").addEventListener("click", openGoals);
+
+  function updateUnlocatedBanner() {
+    const type = view === "disciples" ? "disciple" : "church";
+    const missing = data.filter(d => d.type === type && !hasLocation(d));
+    let el = $("#unlocated-banner");
+    if (!missing.length) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement("button");
+      el.id = "unlocated-banner";
+      el.className = "unlocated-banner";
+      document.querySelector("main").appendChild(el);
+      el.onclick = () => { listOpen = true; $("#list-panel").classList.add("open"); };
+    }
+    el.textContent = `📍 ${missing.map(m => firstWord(m.name)).join(", ")} — location not set`;
+  }
 
   function refresh() { renderMarkers(); renderList(); }
   refresh();

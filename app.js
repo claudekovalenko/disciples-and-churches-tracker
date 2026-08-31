@@ -27,18 +27,37 @@
       notes: "Serving in Mongolia.", training: {} },
     { name: "Gavin", place: "", lat: null, lng: null, soil: "unset",
       notes: "", training: {} },
+    { name: "Henry McAlpine", place: "Los Angeles, CA", lat: 34.0522, lng: -118.2437, soil: "unset",
+      notes: "", training: {} },
   ];
 
-  // Runs once. Adds only the focus disciples you don't already have (matched by
-  // first name), marks the ones you do have as focus, and never overwrites your
-  // own edits or re-adds someone you have deliberately deleted.
-  const FOCUS_SYNC_KEY = "shepherd.focusSync.v1";
+  // Each focus disciple is offered to your device exactly once, tracked by name in
+  // a ledger. Someone added to the roster later gets synced on the next launch,
+  // while anyone you have deleted stays deleted. Your own edits are never touched.
+  const FOCUS_SYNC_KEY = "shepherd.focusSync.v1";   // legacy boolean flag
+  const FOCUS_LEDGER_KEY = "shepherd.focusSynced.v1";
+  const firstName = n => String(n || "").trim().toLowerCase().split(/\s+/)[0];
+
+  function loadLedger() {
+    try {
+      const raw = localStorage.getItem(FOCUS_LEDGER_KEY);
+      if (raw) return new Set(JSON.parse(raw));
+    } catch (e) {}
+    // upgrading from the old all-or-nothing flag: everyone synced back then is
+    // already accounted for, so only genuinely new names get offered.
+    if (localStorage.getItem(FOCUS_SYNC_KEY)) {
+      return new Set(["sujit", "isaac", "becca", "gavin"]);
+    }
+    return new Set();
+  }
+
   function syncFocusDisciples(items) {
-    if (localStorage.getItem(FOCUS_SYNC_KEY)) return items;
-    const firstName = n => String(n || "").trim().toLowerCase().split(/\s+/)[0];
+    const ledger = loadLedger();
     let changed = false;
     FOCUS_DISCIPLES.forEach(fd => {
       const key = firstName(fd.name);
+      if (ledger.has(key)) return;         // already offered once — leave it alone
+      ledger.add(key);
       const existing = items.find(i => i.type === "disciple" && firstName(i.name) === key);
       if (existing) {
         if (!existing.focus) { existing.focus = true; changed = true; } // yours already — only mark it
@@ -49,7 +68,7 @@
     });
     // persist immediately, or the additions vanish on the next launch
     if (changed) localStorage.setItem(STORE_KEY, JSON.stringify(items));
-    localStorage.setItem(FOCUS_SYNC_KEY, "1");
+    localStorage.setItem(FOCUS_LEDGER_KEY, JSON.stringify([...ledger]));
     return items;
   }
 

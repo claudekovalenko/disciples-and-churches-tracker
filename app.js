@@ -94,6 +94,26 @@
 
   function firstWord(n) { return String(n || "").trim().split(/\s+/)[0] || "this"; }
 
+  // ---------- texting ----------
+  // A web app can't read your phone's message history, so "last texted" is
+  // recorded when you send from here (or set by hand).
+  const cleanPhone = p => String(p || "").replace(/[^\d+]/g, "");
+  const smsHref = p => "sms:" + cleanPhone(p);
+
+  function textedLabel(item) {
+    if (!item.lastTexted) return item.phone ? "Never texted from here" : "";
+    const d = daysSince(item.lastTexted);
+    if (d === 0) return "Texted today";
+    if (d === 1) return "Texted yesterday";
+    if (d < 0) return `Texted ${esc(item.lastTexted)}`;
+    return `Texted ${d} days ago`;
+  }
+
+  function markTexted(item, date) {
+    item.lastTexted = date || new Date().toISOString().slice(0, 10);
+    save(); renderList();
+  }
+
   function hasLocation(item) {
     return typeof item.lat === "number" && typeof item.lng === "number";
   }
@@ -325,6 +345,7 @@
         <div class="info">
           <div class="name">${i.focus ? `<span class="star">⭐</span>` : ""}${esc(i.name)}${full ? ` <span class="tag trained-tag">Fully trained</span>` : ""}${isHouseChurch(i) ? ` <span class="tag house-tag">House church</span>` : ""}</div>
           <div class="meta">${hasLocation(i) ? esc(i.place || "Pinned") : `<span class="no-loc">📍 Location not set</span>`} · ${i.role === "building" ? "Building" : "Blessing"} · ${followupLabel(i)}</div>
+          ${i.phone ? `<div class="meta ${staleText(i) ? "stale" : ""}">💬 ${esc(textedLabel(i))}</div>` : ""}
           ${i.type === "disciple" ? `
             <div class="meta soil-line"><i class="soil-chip ${statusClass(i)}"></i>${esc(SOILS[i.soil || "unset"].soil)}</div>
             <div class="mini-bar" title="${done} of ${TRAINING.length} tools"><span style="width:${(done / TRAINING.length) * 100}%"></span></div>
@@ -380,6 +401,38 @@
         </div>
         <div class="bar"><span style="width:${pct}%"></span></div>
       </button>`;
+  }
+
+  // ---------- contact / texting ----------
+  function contactBlock(item) {
+    const name = esc(firstWord(item.name));
+    if (!item.phone) {
+      return `
+        <div class="contact-block">
+          <button class="btn" id="d-addphone">💬 Add ${name}'s number to text them</button>
+        </div>`;
+    }
+    return `
+      <div class="contact-block">
+        <a class="btn primary text-btn" id="d-text" href="${esc(smsHref(item.phone))}">💬 Text ${name}</a>
+        <div class="contact-meta">
+          <span class="contact-num">${esc(item.phone)}</span>
+          <span class="contact-when ${staleText(item) ? "stale" : ""}">${esc(textedLabel(item))}</span>
+        </div>
+        <div class="contact-actions">
+          <button class="link-btn" id="d-texted-now">Mark texted today</button>
+          <label class="link-btn-label">or set date
+            <input type="date" id="d-texted-date" value="${esc(item.lastTexted || "")}" />
+          </label>
+        </div>
+      </div>`;
+  }
+
+  // more than three weeks without a text is worth flagging
+  function staleText(item) {
+    if (!item.phone) return false;
+    if (!item.lastTexted) return true;
+    return daysSince(item.lastTexted) > 21;
   }
 
   // ---------- target 1 panel: the training toolset ----------
@@ -457,6 +510,7 @@
         </button>` : ""}
       ${!hasLocation(item) ? `
         <button class="btn locate-btn" id="d-locate">📍 Set ${esc(firstWord(item.name))}'s location</button>` : ""}
+      ${contactBlock(item)}
       <div class="badges">
         <span class="badge ${item.role}">${item.role === "building" ? "🔨 Building" : "🕊️ Blessing"}</span>
         ${item.type === "disciple"
@@ -468,7 +522,7 @@
       <div class="stat-row">
         <div class="stat"><div class="v">${(item.checkins || []).length}</div><div class="k">Check-ins</div></div>
         <div class="stat"><div class="v">${lc ? daysSince(lc.date) + "d" : "—"}</div><div class="k">Since last</div></div>
-        <div class="stat"><div class="v">${item.role === "building" ? "High" : "Support"}</div><div class="k">Responsibility</div></div>
+        <div class="stat"><div class="v">${item.lastTexted ? daysSince(item.lastTexted) + "d" : "—"}</div><div class="k">Since text</div></div>
       </div>
       ${item.notes ? `<div class="notes-block">${esc(item.notes)}</div>` : ""}
       <div class="section-label">History</div>
@@ -490,6 +544,22 @@
     };
     const locateBtn = $("#d-locate");
     if (locateBtn) locateBtn.onclick = () => { closeSheets(); openForm(item.id); };
+
+    const addPhone = $("#d-addphone");
+    if (addPhone) addPhone.onclick = () => { closeSheets(); openForm(item.id); };
+    const textBtn = $("#d-text");
+    if (textBtn) textBtn.onclick = () => {
+      // record before the phone hands off to Messages
+      markTexted(item);
+      setTimeout(() => openDetail(item.id), 400);
+    };
+    const textedNow = $("#d-texted-now");
+    if (textedNow) textedNow.onclick = () => { markTexted(item); openDetail(item.id); };
+    const textedDate = $("#d-texted-date");
+    if (textedDate) textedDate.onchange = () => {
+      item.lastTexted = textedDate.value || null;
+      save(); renderList(); openDetail(item.id);
+    };
     if (item.type === "disciple") {
       $("#d-soil").querySelectorAll(".soil-opt").forEach(b => b.onclick = () => {
         item.soil = b.dataset.s;
@@ -693,6 +763,10 @@
         <input type="text" id="f-place" autocomplete="off" placeholder="Start typing a city, church, or address…" value="${esc(editing?.place || "")}" />
         <div class="ac-list" id="f-place-list" hidden></div>
       </div>
+      <label>Phone number</label>
+      <input type="tel" id="f-phone" inputmode="tel" autocomplete="tel"
+             placeholder="+1 555 123 4567" value="${esc(editing?.phone || "")}" />
+      <div class="loc-display">Used for the text button — stays on your device.</div>
       <label>Relationship</label>
       <div class="seg" id="f-role">
         <button data-r="building" class="${(!editing || editing.role === "building") ? "active" : ""}">🔨 Building</button>
@@ -837,6 +911,7 @@
       // a location is optional — "not set yet" is a valid state
       const fields = {
         name, place: $("#f-place").value.trim(), role, notes: $("#f-notes").value.trim(),
+        phone: $("#f-phone").value.trim(),
         lat: loc ? loc.lat : null, lng: loc ? loc.lng : null,
       };
       if (type === "disciple") {
@@ -849,7 +924,7 @@
         if (kind === "house") fields.formed = editing?.formed || new Date().toISOString().slice(0, 7);
       }
       if (editing) {
-        Object.assign(editing, fields);
+        Object.assign(editing, fields); // lastTexted is untouched by the form
       } else {
         data.push({ id: uid(), type, ...fields, checkins: [] });
       }

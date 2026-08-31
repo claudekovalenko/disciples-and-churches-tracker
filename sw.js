@@ -1,4 +1,4 @@
-const CACHE = "shepherd-v7";
+const CACHE = "shepherd-v8";
 const ASSETS = [
   ".",
   "index.html",

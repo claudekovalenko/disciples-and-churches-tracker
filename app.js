@@ -23,7 +23,7 @@
       training: { assurance: true, baptized: true, word: true, story: true, gospel: true, dbs: true } },
     { name: "Isaac", place: "", lat: null, lng: null, soil: "unset",
       notes: "Location still to be confirmed.", training: {} },
-    { name: "Becca", place: "Mongolia", lat: 47.8864, lng: 106.9057, soil: "unset",
+    { name: "Becca Topping", place: "Mongolia", lat: 47.8864, lng: 106.9057, soil: "unset",
       notes: "Serving in Mongolia.", training: {} },
     { name: "Gavin", place: "", lat: null, lng: null, soil: "unset",
       notes: "", training: {} },
@@ -53,6 +53,26 @@
     return items;
   }
 
+  // One-time surname fill for focus disciples added before their full name was known.
+  // Only touches an exact bare first-name match, so a name you have edited is left alone.
+  const NAME_FILL_KEY = "shepherd.nameFill.v1";
+  const NAME_FILLS = [{ from: "becca", to: "Becca Topping" }];
+  function fillFocusNames(items) {
+    if (localStorage.getItem(NAME_FILL_KEY)) return items;
+    let changed = false;
+    NAME_FILLS.forEach(({ from, to }) => {
+      items.forEach(i => {
+        if (i.type === "disciple" && String(i.name || "").trim().toLowerCase() === from) {
+          i.name = to;
+          changed = true;
+        }
+      });
+    });
+    if (changed) localStorage.setItem(STORE_KEY, JSON.stringify(items));
+    localStorage.setItem(NAME_FILL_KEY, "1");
+    return items;
+  }
+
   function firstWord(n) { return String(n || "").trim().split(/\s+/)[0] || "this"; }
 
   function hasLocation(item) {
@@ -63,7 +83,7 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) return syncFocusDisciples(migrate(JSON.parse(raw)));
+      if (raw) return fillFocusNames(syncFocusDisciples(migrate(JSON.parse(raw))));
     } catch (e) {}
     const s = seed();
     localStorage.setItem(STORE_KEY, JSON.stringify(s));
